@@ -6,7 +6,7 @@ spring:
     active: dev
 
   jpa:
-    open-in-view: false          # avoid lazy-loading surprises outside the service layer
+    open-in-view: false
     properties:
       hibernate:
         format_sql: true
@@ -23,21 +23,18 @@ spring:
     default-property-inclusion: non_null
 
 server:
-  port:${PORT:8081}
+  port: "${PORT:8081}"
   error:
     include-message: always
     include-binding-errors: always
 
-# ===== Custom app properties =====
 app:
   jwt:
-    # Set via env var in real deployments — see application-prod.yml
     secret: ${JWT_SECRET:dev-only-secret-change-me-32-bytes-min}
-    expiration-ms: 3600000          # 1 hour access token
-    refresh-expiration-ms: 604800000 # 7 days refresh token
+    expiration-ms: 3600000
+    refresh-expiration-ms: 604800000
 
   encryption:
-    # AES-256-GCM key for encrypting stored destination URLs — MUST be overridden outside dev
     secret-key: ${ENCRYPTION_SECRET_KEY:dev-only-encryption-key-32bytes!}
 
   short-link:
