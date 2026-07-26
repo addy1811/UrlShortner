@@ -24,7 +24,7 @@ spring:
 
 server:
    port: "${PORT:8081}"
-  error:
+   error:
     include-message: always
     include-binding-errors: always
 
