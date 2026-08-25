@@ -182,10 +182,6 @@ Notable design choices baked into the schema:
 - **Refresh tokens aren't actually used yet.** `AuthResponse` issues a `refreshToken` and the frontend stores it, but there's no `/api/auth/refresh` endpoint — `axiosClient`'s 401 handler just clears storage and sends the user back to login instead of silently refreshing.
 - **Pending email invites don't auto-activate on registration.** `LinkAccessGrantRepository.findByInvitedEmailAndStatus(...)` exists specifically to attach pending grants when an invited email signs up, and the code comments describe this flow — but `AuthService.register()` doesn't currently call it. An invited user who registers still needs the grant reactivated manually.
 - **`application.yml` has a YAML formatting bug:**
-  ```yaml
-  server:
-    port:${PORT: 8081}   
-  ```
   This parses as a literal key rather than `port` mapped to `${PORT:8081}`, which can prevent the app from binding to Render's injected `$PORT` correctly. Should be `port: ${PORT:8081}`.
 - **`ProtectedRoute` is a UI-only gate.** It just prevents rendering an authenticated page for a logged-out user; the real enforcement is `SecurityConfig`'s `anyRequest().authenticated()` on the backend, as noted in the component's own comments — worth keeping in mind if extending it.
 
