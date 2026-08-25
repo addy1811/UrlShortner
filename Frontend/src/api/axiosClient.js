@@ -1,7 +1,5 @@
 import axios from 'axios';
 
-// Vite's dev proxy (vite.config.js) forwards /api to the backend, so this can
-// stay a relative path in both dev and prod.
 const axiosClient = axios.create({
   baseURL: '/api',
   headers: {
@@ -9,7 +7,6 @@ const axiosClient = axios.create({
   },
 });
 
-// Attaches the access token to every outgoing request, if one exists.
 axiosClient.interceptors.request.use((config) => {
   const token = localStorage.getItem('accessToken');
   if (token) {
@@ -18,22 +15,77 @@ axiosClient.interceptors.request.use((config) => {
   return config;
 });
 
-// NOTE: the backend's AuthController only exposes /register and /login -
-// there's no /auth/refresh endpoint yet, so a 401 here can't silently retry
-// with a fresh token. Instead, clear the stale token and send the user back
-// to log in again. If a refresh endpoint gets added to AuthService/AuthController
-// later, this is the place to add the retry-with-refresh-token logic.
+let isRefreshing = false;
+let pendingQueue = [];
+
+function resolveQueue(error, newAccessToken) {
+  pendingQueue.forEach(({ resolve, reject }) => {
+    if (error) reject(error);
+    else resolve(newAccessToken);
+  });
+  pendingQueue = [];
+}
+
+function redirectToLogin() {
+  localStorage.removeItem('accessToken');
+  localStorage.removeItem('refreshToken');
+  localStorage.removeItem('userId');
+  localStorage.removeItem('username');
+  if (window.location.pathname !== '/login') {
+    window.location.href = '/login';
+  }
+}
+
 axiosClient.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+  async (error) => {
+    const originalRequest = error.config;
+
+    if (error.response?.status !== 401 || originalRequest._retry || originalRequest.url === '/auth/refresh') {
+
+      if (error.response?.status === 401) {
+        redirectToLogin();
       }
+      return Promise.reject(error);
     }
-    return Promise.reject(error);
+
+    const refreshToken = localStorage.getItem('refreshToken');
+    if (!refreshToken) {
+      redirectToLogin();
+      return Promise.reject(error);
+    }
+
+    originalRequest._retry = true;
+
+    if (isRefreshing) {
+
+      return new Promise((resolve, reject) => {
+        pendingQueue.push({ resolve, reject });
+      }).then((newAccessToken) => {
+        originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+        return axiosClient(originalRequest);
+      });
+    }
+
+    isRefreshing = true;
+
+    try {
+      const { data } = await axiosClient.post('/auth/refresh', { refreshToken });
+
+      localStorage.setItem('accessToken', data.accessToken);
+      localStorage.setItem('refreshToken', data.refreshToken);
+
+      resolveQueue(null, data.accessToken);
+
+      originalRequest.headers.Authorization = `Bearer ${data.accessToken}`;
+      return axiosClient(originalRequest);
+    } catch (refreshError) {
+      resolveQueue(refreshError, null);
+      redirectToLogin();
+      return Promise.reject(refreshError);
+    } finally {
+      isRefreshing = false;
+    }
   }
 );
 

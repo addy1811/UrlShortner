@@ -1,14 +1,27 @@
+import { useState } from 'react';
 import { Link } from 'react-router';
 import { useAuth } from '@/hooks/useAuth';
-import  letterS  from '@/assets/letter-s.png';
+import letterS from '@/assets/letter-s.png';
+
 export default function Navbar() {
   const { isAuthenticated, username, logout } = useAuth();
+  const [logoFailed, setLogoFailed] = useState(false);
 
   return (
     <nav className="border-b border-border bg-surface-raised">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
         <Link to="/" className="font-display text-lg font-semibold text-ink">
-          <img src= { letterS} alt="Logo" width={30} height={30}/>
+          {logoFailed ? (
+            <span className="font-mono-code">S</span>
+          ) : (
+            <img
+              src={letterS}
+              alt="Logo"
+              width={30}
+              height={30}
+              onError={() => setLogoFailed(true)}
+            />
+          )}
         </Link>
 
         <div className="flex items-center gap-4 text-sm">

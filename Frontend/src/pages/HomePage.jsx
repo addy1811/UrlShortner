@@ -10,7 +10,7 @@ export default function HomePage() {
           <span className="text-signal">on your terms.</span>
         </h1>
         <p className="mx-auto mt-4 max-w-lg text-ink-muted">
-          An encrypted URL shortener where you control exactly who can use each link -
+          An encrypted URL shortener where you control exactly who can use each link 
           and can collect structured data from the people who do.
         </p>
 

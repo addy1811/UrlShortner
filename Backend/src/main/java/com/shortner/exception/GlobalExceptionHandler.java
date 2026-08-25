@@ -1,5 +1,5 @@
 package com.shortner.exception;
-
+import com.shortner.exception.PendingInviteException;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.ValidationException;
 import org.springframework.http.HttpStatus;
@@ -39,9 +39,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BadCredentialsException.class)
     public ResponseEntity<Map<String, Object>> handleBadCredentials(BadCredentialsException ex) {
-        // Deliberately generic message - never confirm/deny whether the username
-        // or the password was the wrong part, that's a user-enumeration leak.
         return buildResponse(HttpStatus.UNAUTHORIZED, "Invalid username/email or password");
+    }
+    @ExceptionHandler(PendingInviteException.class)
+    public ResponseEntity<Map<String, Object>> handlePendingInvite(PendingInviteException ex) {
+    return buildResponse(HttpStatus.CONFLICT, ex.getMessage());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -67,8 +69,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ValidationException.class)
     public ResponseEntity<Map<String, Object>> handleValidationException(ValidationException ex) {
-        // Thrown by FormService when a submission doesn't match the owner-defined
-        // dynamic form schema (missing required field, invalid dropdown value, etc.)
         return buildResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
@@ -79,8 +79,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleGeneric(Exception ex) {
-        // Catch-all so an unexpected NPE/etc. never leaks a stack trace to the client -
-        // application-prod.yml also disables stacktrace inclusion as a second layer of defense.
         return buildResponse(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred");
     }
 

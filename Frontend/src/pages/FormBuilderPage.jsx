@@ -7,8 +7,6 @@ import Input from '@/components/ui/Input';
 
 const FIELD_TYPES = ['TEXT', 'NUMBER', 'EMAIL', 'DATE', 'DROPDOWN', 'CHECKBOX'];
 
-// Matches FormFieldRequest exactly - options stays a comma-separated string in
-// the UI for easier editing, converted to an array only on save.
 function emptyField() {
   return {
     fieldKey: '',

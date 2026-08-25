@@ -9,3 +9,8 @@ export async function login({ usernameOrEmail, password }) {
   const { data } = await axiosClient.post('/auth/login', { usernameOrEmail, password });
   return data;
 }
+
+export async function refresh(refreshToken) {
+  const { data } = await axiosClient.post('/auth/refresh', { refreshToken });
+  return data;
+}

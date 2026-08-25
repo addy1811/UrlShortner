@@ -19,15 +19,10 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
 
-        {/* Public - anonymous visitors fill this out, no auth required.
-            Mirrors the backend's permitAll rules on GET/POST /links/{id}/form */}
         <Route path="/f/:linkId" element={<PublicFormPage />} />
 
-           {/* Public - see RedirectResolverPage's comment for why this exists
-            as a frontend page rather than a raw link to the backend. */}
         <Route path="/r/:code" element={<RedirectResolverPage />} />
         
-        {/* Owner-only routes, gated by ProtectedRoute */}
         <Route element={<ProtectedRoute />}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/links/:linkId" element={<LinkDetailPage />} />

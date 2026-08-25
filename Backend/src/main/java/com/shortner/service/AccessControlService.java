@@ -9,6 +9,7 @@ import com.shortner.exception.AccessDeniedException;
 import com.shortner.exception.DuplicateAliasException;
 import com.shortner.exception.LinkExpiredException;
 import com.shortner.exception.LinkNotFoundException;
+import com.shortner.exception.PendingInviteException;
 import com.shortner.repository.LinkAccessGrantRepository;
 import com.shortner.repository.ShortLinkRepository;
 import com.shortner.repository.UserRepository;
@@ -20,13 +21,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-/**
- * Single source of truth for "can this request touch this link" AND for managing
- * who's on the RESTRICTED allow-list. Every entry point that resolves or reads a
- * link (redirect, form schema, form submission, analytics) must go through
- * assertAccessAllowed rather than re-implementing visibility checks locally -
- * that duplication is exactly how access-control bugs creep in.
- */
 @Service
 @RequiredArgsConstructor
 public class AccessControlService {
@@ -35,10 +29,6 @@ public class AccessControlService {
     private final ShortLinkRepository shortLinkRepository;
     private final UserRepository userRepository;
 
-    /**
-     * Throws if the given (possibly anonymous, requestingUserId == null) requester
-     * is not allowed to resolve/use this link right now. Returns normally if allowed.
-     */
     public void assertAccessAllowed(ShortLink link, UUID requestingUserId) {
         if (!link.isActive()) {
             throw new LinkNotFoundException("This link is no longer active");
@@ -50,7 +40,7 @@ public class AccessControlService {
 
         boolean isOwner = requestingUserId != null && requestingUserId.equals(link.getOwner().getId());
         if (isOwner) {
-            return; // owners always have access to their own links
+            return; 
         }
 
         switch (link.getVisibility()) {
@@ -83,7 +73,6 @@ public class AccessControlService {
         }
     }
 
-    // ===== Grant management (RESTRICTED visibility allow-list) =====
 
     @Transactional
    public LinkAccessGrant grantAccess(UUID ownerId, UUID linkId, GrantAccessRequest request) {
@@ -93,8 +82,6 @@ public class AccessControlService {
     LinkAccessGrant.LinkAccessGrantBuilder builder = LinkAccessGrant.builder().link(link);
 
     if (request.username() != null) {
-        // Username was explicitly provided - it must resolve to a real user,
-        // there's no "invite by username" concept, only "invite by email".
         User user = userRepository.findByUsername(request.username())
             .orElseThrow(() -> new LinkNotFoundException("No user found with username '" + request.username() + "'"));
 
@@ -119,19 +106,22 @@ public class AccessControlService {
 
     return linkAccessGrantRepository.save(builder.build());
 }
-    @Transactional
-    public void revokeAccess(UUID ownerId, UUID linkId, UUID grantId) {
-        shortLinkRepository.findByIdAndOwnerId(linkId, ownerId)
-            .orElseThrow(() -> new LinkNotFoundException("Link not found"));
+@Transactional
+public void revokeAccess(UUID ownerId, UUID linkId, UUID grantId) {
+    shortLinkRepository.findByIdAndOwnerId(linkId, ownerId)
+        .orElseThrow(() -> new LinkNotFoundException("Link not found"));
 
-        LinkAccessGrant grant = linkAccessGrantRepository.findById(grantId)
-            .orElseThrow(() -> new LinkNotFoundException("Grant not found"));
+    LinkAccessGrant grant = linkAccessGrantRepository.findById(grantId)
+        .orElseThrow(() -> new LinkNotFoundException("Grant not found"));
 
-        grant.setStatus(GrantStatus.REVOKED);
-        linkAccessGrantRepository.save(grant);
+    if (!grant.getLink().getId().equals(linkId)) {
+        throw new LinkNotFoundException("Grant not found");
     }
-    
-    @Transactional
+
+    grant.setStatus(GrantStatus.REVOKED);
+    linkAccessGrantRepository.save(grant);
+}
+@Transactional
 public LinkAccessGrant reactivateAccess(UUID ownerId, UUID linkId, UUID grantId) {
     shortLinkRepository.findByIdAndOwnerId(linkId, ownerId)
         .orElseThrow(() -> new LinkNotFoundException("Link not found"));
@@ -139,10 +129,12 @@ public LinkAccessGrant reactivateAccess(UUID ownerId, UUID linkId, UUID grantId)
     LinkAccessGrant grant = linkAccessGrantRepository.findByIdWithGrantee(grantId)
         .orElseThrow(() -> new LinkNotFoundException("Grant not found"));
 
+    if (!grant.getLink().getId().equals(linkId)) {
+        throw new LinkNotFoundException("Grant not found");
+    }
+
     if (grant.getGrantee() == null) {
-        // Pending email invites activate automatically when the invitee registers
-        // (see AuthService) - there's nothing to manually toggle here yet.
-        throw new IllegalStateException("This invite is still pending - it will activate once the invitee registers");
+        throw new PendingInviteException("This invite is still pending - it will activate once the invitee registers");
     }
 
     grant.setStatus(GrantStatus.ACTIVE);

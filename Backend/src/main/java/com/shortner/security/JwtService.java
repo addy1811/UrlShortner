@@ -78,6 +78,14 @@ public class JwtService {
         }
     }
 
+    public boolean isTokenExpired(String token) {
+    try {
+        return parseClaims(token).getExpiration().before(new Date());
+    } catch (JwtException | IllegalArgumentException e) {
+        return true; // malformed/tampered treated as expired/invalid
+    }
+}
+
     public boolean isRefreshToken(String token) {
         return "refresh".equals(parseClaims(token).get("type", String.class));
     }

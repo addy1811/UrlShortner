@@ -11,10 +11,6 @@ export const createLinkThunk = createAsyncThunk(
     try {
       return await linksApi.createLink(payload);
     } catch (err) {
-      // createAsyncThunk normally serializes rejected errors down to just a
-      // message, dropping axios's err.response.data (which has the real
-      // fieldErrors from GlobalExceptionHandler). rejectWithValue preserves
-      // it so the UI can show the actual validation message, not a generic one.
       return rejectWithValue(err.response?.data);
     }
   }

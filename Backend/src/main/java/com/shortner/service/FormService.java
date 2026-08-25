@@ -5,6 +5,7 @@ import com.shortner.dto.form.FormSchemaResponse;
 import com.shortner.dto.form.FormSubmissionRequest;
 import com.shortner.entity.FieldType;
 import com.shortner.entity.FormField;
+import com.shortner.dto.form.FormResponseDto;
 import com.shortner.entity.FormResponse;
 import com.shortner.entity.ShortLink;
 import com.shortner.entity.User;
@@ -34,7 +35,6 @@ public class FormService {
     private final UserRepository userRepository;
     private final AccessControlService accessControlService;
 
-    /** Owner defines/replaces the full set of fields for their link's form in one call. */
     @Transactional
     public FormSchemaResponse defineFormFields(UUID ownerId, UUID linkId, List<FormFieldRequest> fieldRequests) {
         ShortLink link = shortLinkRepository.findByIdAndOwnerId(linkId, ownerId)
@@ -48,9 +48,6 @@ public class FormService {
                 );
             }
         }
-
-        // Replace-all semantics: simpler mental model for the owner ("this is my form now")
-        // than diffing individual field adds/removes/reorders.
         formFieldRepository.deleteByLinkId(linkId);
 
         List<FormField> fields = fieldRequests.stream()
@@ -102,38 +99,74 @@ public class FormService {
     }
 
     @Transactional(readOnly = true)
-    public Page<FormResponse> getResponsesForOwner(UUID ownerId, UUID linkId, Pageable pageable) {
-        // Ownership check first - a non-owner should never learn whether the link
-        // even has responses, let alone see them.
-        shortLinkRepository.findByIdAndOwnerId(linkId, ownerId)
-            .orElseThrow(() -> new LinkNotFoundException("Link not found"));
+   public Page<FormResponseDto> getResponsesForOwner(UUID ownerId, UUID linkId, Pageable pageable) {
+    shortLinkRepository.findByIdAndOwnerId(linkId, ownerId)
+        .orElseThrow(() -> new LinkNotFoundException("Link not found"));
 
-        return formResponseRepository.findByLinkIdOrderBySubmittedAtDesc(linkId, pageable);
-    }
+    return formResponseRepository.findByLinkIdOrderBySubmittedAtDesc(linkId, pageable)
+        .map(r -> new FormResponseDto(
+            r.getId(),
+            r.getSubmittedBy() != null ? r.getSubmittedBy().getId() : null,
+            r.getSubmittedBy() != null ? r.getSubmittedBy().getUsername() : null,
+            r.getResponseData(),
+            r.getSubmittedAt()
+        ));
+}
 
-    /** Cross-checks submitted keys/values against the owner-defined schema before persisting. */
-    private void validateSubmission(List<FormField> fields, Map<String, Object> responseData) {
-        for (FormField field : fields) {
-            Object value = responseData.get(field.getFieldKey());
+private static final java.util.regex.Pattern EMAIL_PATTERN =
+    java.util.regex.Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
 
-            if (field.isRequired() && (value == null || value.toString().isBlank())) {
-                throw new ValidationException("Field '" + field.getFieldKey() + "' is required");
+private void validateSubmission(List<FormField> fields, Map<String, Object> responseData) {
+    for (FormField field : fields) {
+        Object value = responseData.get(field.getFieldKey());
+
+        if (field.isRequired() && (value == null || value.toString().isBlank())) {
+            throw new ValidationException("Field '" + field.getFieldKey() + "' is required");
+        }
+
+        if (value == null || value.toString().isBlank()) {
+            continue;
+        }
+
+        String stringValue = value.toString();
+
+        switch (field.getFieldType()) {
+            case NUMBER -> {
+                try {
+                    Double.parseDouble(stringValue);
+                } catch (NumberFormatException e) {
+                    throw new ValidationException(
+                        "Field '" + field.getFieldKey() + "' must be a number"
+                    );
+                }
             }
-
-            if (value == null) {
-                continue;
+            case DATE -> {
+                try {
+                    java.time.LocalDate.parse(stringValue);
+                } catch (java.time.format.DateTimeParseException e) {
+                    throw new ValidationException(
+                        "Field '" + field.getFieldKey() + "' must be a valid date (YYYY-MM-DD)"
+                    );
+                }
             }
-
-            if ((field.getFieldType() == FieldType.DROPDOWN || field.getFieldType() == FieldType.CHECKBOX)
-                && field.getOptions() != null
-                && !field.getOptions().contains(value.toString())) {
-                throw new ValidationException(
-                    "Value '" + value + "' is not a valid option for field '" + field.getFieldKey() + "'"
-                );
+            case EMAIL -> {
+                if (!EMAIL_PATTERN.matcher(stringValue).matches()) {
+                    throw new ValidationException(
+                        "Field '" + field.getFieldKey() + "' must be a valid email address"
+                    );
+                }
             }
+            case DROPDOWN, CHECKBOX -> {
+                if (field.getOptions() != null && !field.getOptions().contains(stringValue)) {
+                    throw new ValidationException(
+                        "Value '" + value + "' is not a valid option for field '" + field.getFieldKey() + "'"
+                    );
+                }
+            }
+            case TEXT -> { }
         }
     }
-
+}
     private FormSchemaResponse toSchemaResponse(UUID linkId, List<FormField> fields) {
         List<FormSchemaResponse.Field> fieldDtos = fields.stream()
             .map(f -> new FormSchemaResponse.Field(

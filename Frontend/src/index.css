@@ -1,13 +1,6 @@
 @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap");
 @import "tailwindcss";
 
-/*
-  Design brief: this product's one truly distinctive material is the short
-  code itself - a string gated by a visibility state (public/private/restricted).
-  Mono type carries that signature throughout; the palette stays a warm,
-  quiet ink-on-off-white rather than the cream+terracotta or near-black+neon
-  defaults that read as generic AI output.
-*/
 @theme {
   --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;

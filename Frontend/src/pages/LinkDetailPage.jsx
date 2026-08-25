@@ -44,7 +44,6 @@ export default function LinkDetailPage() {
       const data = await grantsApi.listGrants(linkId);
       setGrants(data);
     } catch {
-      // Non-fatal - the grants panel just stays empty if this fails.
     }
   }, [linkId]);
 
@@ -83,17 +82,24 @@ export default function LinkDetailPage() {
   }
 
   async function handleRevoke(grantId) {
-  await grantsApi.revokeAccess(linkId, grantId);
-  setGrants((prev) =>
-    prev.map((g) => (g.id === grantId ? { ...g, status: 'REVOKED' } : g))
-  );
+  try {
+    await grantsApi.revokeAccess(linkId, grantId);
+    setGrants((prev) =>
+      prev.map((g) => (g.id === grantId ? { ...g, status: 'REVOKED' } : g))
+    );
+  } catch (err) {
+    window.alert(err.response?.data?.error || 'Failed to revoke access. Please try again.');
+  }
 }
 
 async function handleReactivate(grantId) {
-  const updated = await grantsApi.reactivateAccess(linkId, grantId);
-  setGrants((prev) => prev.map((g) => (g.id === grantId ? updated : g)));
+  try {
+    const updated = await grantsApi.reactivateAccess(linkId, grantId);
+    setGrants((prev) => prev.map((g) => (g.id === grantId ? updated : g)));
+  } catch (err) {
+    window.alert(err.response?.data?.error || 'Failed to reactivate access. Please try again.');
+  }
 }
-
   async function handleLoadResponses() {
     try {
       const data = await formApi.getFormResponses(linkId);

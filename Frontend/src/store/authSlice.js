@@ -1,8 +1,5 @@
 import { createSlice } from '@reduxjs/toolkit';
 
-// Bootstrap initial state from localStorage so a page refresh doesn't log
-// the user out - the JWT itself is the source of truth, this just avoids
-// a flash of "logged out" before any API call has a chance to confirm it.
 const initialState = {
   userId: localStorage.getItem('userId') || null,
   username: localStorage.getItem('username') || null,

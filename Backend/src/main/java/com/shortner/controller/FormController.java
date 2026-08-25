@@ -4,6 +4,7 @@ import com.shortner.dto.form.FormFieldRequest;
 import com.shortner.dto.form.FormSchemaResponse;
 import com.shortner.dto.form.FormSubmissionRequest;
 import com.shortner.entity.FormResponse;
+import com.shortner.dto.form.FormResponseDto;
 import com.shortner.security.SecurityUtils;
 import com.shortner.service.FormService;
 import jakarta.validation.Valid;
@@ -55,11 +56,11 @@ public class FormController {
 
     /** Owner-only: paginated view of everything submitted through this link's form. */
     @GetMapping("/responses")
-    public ResponseEntity<Page<FormResponse>> getResponses(
+    public ResponseEntity<Page<FormResponseDto>> getResponses(
         @PathVariable UUID linkId,
         @PageableDefault(size = 20) Pageable pageable
     ) {
-        Page<FormResponse> responses = formService.getResponsesForOwner(
+        Page<FormResponseDto> responses = formService.getResponsesForOwner(
             SecurityUtils.getCurrentUserId(), linkId, pageable
         );
         return ResponseEntity.ok(responses);

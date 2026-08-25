@@ -1,16 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router';
 import axiosClient from '@/api/axiosClient';
-
-// This page exists specifically to solve one problem: a plain browser
-// navigation (typing a URL, clicking a raw link) can NEVER carry a
-// Bearer token, since browsers only attach custom headers to requests made
-// by page JavaScript (fetch/axios), not to normal navigation. So instead of
-// short links pointing straight at the backend's raw 302 redirect (which
-// would always look "anonymous" to the server), they point HERE - this page
-// runs in the browser, makes an authenticated axios call (which DOES carry
-// the JWT), and only then redirects. PUBLIC links resolve instantly either
-// way; PRIVATE/RESTRICTED links only work through this page.
 export default function RedirectResolverPage() {
   const { code } = useParams();
   const [state, setState] = useState('loading'); // 'loading' | 'error'
