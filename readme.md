@@ -108,6 +108,284 @@ vite.config.js
 
 ---
 
+##  High-Level Architecture
+<img width="1496" height="776" alt="AdobeExpressPhotos_a801fdc422ad4b9bac2b8269b68ce816_CopyEdited" src="https://github.com/user-attachments/assets/90af5201-55eb-401c-ab0c-1e683b7df8aa" />
+**two redirect paths (`/r/{code}` vs `/api/links/resolve/{code}`):** a plain browser navigation (typing/clicking a link) can never attach a custom `Authorization` header — browsers don't do that for normal navigation. So `/r/{code}` works for PUBLIC links only when access needs no token. The SPA calls `/resolve/{code}` via axios instead, which *does* attach the JWT, so PRIVATE/RESTRICTED links can be resolved for a logged-in owner/grantee, with the frontend performing the actual `window.location` redirect once access is confirmed. Both paths funnel into the same `ShortLinkService.resolveForRedirect()` — there's exactly one access-control code path, not two.
+
+## Database Design
+ 
+###  Entity-Relationship Diagram
+ 
+```mermaid
+erDiagram
+    USERS ||--o{ SHORT_LINKS : owns
+    USERS ||--o{ ACCESS_GRANTS : "granted to"
+    USERS ||--o{ FORM_RESPONSES : submits
+    USERS ||--o{ ACCESS_LOGS : "attempted by"
+    SHORT_LINKS ||--o{ ACCESS_GRANTS : "restricts via"
+    SHORT_LINKS ||--o{ FORM_FIELDS : defines
+    SHORT_LINKS ||--o{ FORM_RESPONSES : collects
+    SHORT_LINKS ||--o{ ACCESS_LOGS : records
+ 
+    USERS {
+        uuid id PK
+        varchar username UK
+        varchar email UK
+        varchar password_hash
+        timestamptz created_at
+    }
+ 
+    SHORT_LINKS {
+        uuid id PK
+        varchar short_code UK
+        bytea encrypted_destination
+        bytea encryption_iv
+        uuid owner_id FK
+        varchar visibility "PUBLIC/PRIVATE/RESTRICTED"
+        varchar custom_alias UK
+        timestamptz expires_at
+        integer max_uses
+        integer use_count
+        boolean is_active
+        jsonb metadata
+        timestamptz created_at
+    }
+ 
+    ACCESS_GRANTS {
+        uuid id PK
+        uuid link_id FK
+        uuid grantee_user_id FK "nullable"
+        varchar invited_email "nullable"
+        varchar status "PENDING/ACTIVE/REVOKED"
+        timestamptz granted_at
+    }
+ 
+    FORM_FIELDS {
+        uuid id PK
+        uuid link_id FK
+        varchar field_key
+        varchar label
+        varchar field_type
+        boolean is_required
+        jsonb options
+        integer display_order
+    }
+ 
+    FORM_RESPONSES {
+        uuid id PK
+        uuid link_id FK
+        uuid submitted_by_user_id FK "nullable"
+        jsonb response_data
+        timestamptz submitted_at
+    }
+ 
+    ACCESS_LOGS {
+        uuid id PK
+        uuid link_id FK
+        uuid accessed_by_user_id FK "nullable"
+        varchar ip_hash "SHA-256, never raw IP"
+        timestamptz accessed_at
+        boolean access_granted
+    }
+```
+ 
+### Key schema decisions
+ 
+**Encrypted destination, not just access-gated.** `encrypted_destination` (AES-256-GCM ciphertext) + `encryption_iv` are stored as separate `BYTEA` columns rather than one field, because GCM needs a fresh 96-bit IV per encryption and it must travel with the ciphertext to decrypt. A raw DB dump never reveals where any link points — visibility rules protect *access*, encryption protects *confidentiality*, and they're deliberately independent layers.
+ 
+**Grants support invite-before-registration.** `access_grants.grantee_user_id` is nullable and `invited_email` fills the gap: `CHECK (grantee_user_id IS NOT NULL OR invited_email IS NOT NULL)` enforces that one of the two is always present. This lets an owner share a restricted link with someone who hasn't signed up yet — the grant sits `PENDING`, and `AuthService.register()` promotes any matching pending grants to `ACTIVE` the moment that email registers.
+ 
+**Forms are schema-on-write, data-as-JSONB.** `form_fields` defines the schema (key, label, type, required, options) as real rows so it can be validated and rendered; `form_responses.response_data` stores the actual submitted values as `JSONB` keyed by `field_key`. This avoids an EAV (entity-attribute-value) table explosion for arbitrary form shapes while keeping the schema itself relational and constrainable — e.g. `UNIQUE(link_id, field_key)` prevents duplicate keys per form.
+ 
+**Partial index for the security-relevant query.** `idx_access_logs_denied ON access_logs(link_id, access_granted) WHERE access_granted = false` — an owner's "who's been trying and failing to access my link" view only ever filters on denied attempts, so the partial index stays small and fast even as the full log grows unbounded.
+ 
+**GIN indexes on JSONB columns** (`short_links.metadata`, `form_responses.response_data`) support future filtering/search on semi-structured fields without a full table scan.
+ 
+**`ON DELETE CASCADE` from short_links downward, `ON DELETE SET NULL` for the user reference on responses/logs.** Deleting a link should clean up everything scoped to it (grants, fields, responses, logs). Deleting a *user*, though, shouldn't retroactively corrupt historical form submissions or access logs — those rows survive with `submitted_by_user_id`/`accessed_by_user_id` set to `NULL`, preserving the audit trail.
+ 
+**Flyway owns the schema; Hibernate only validates.** `ddl-auto: validate` in both dev and prod — entity/migration drift fails fast at startup instead of Hibernate silently "fixing" the schema. Every change is a numbered, reviewable `V{n}__description.sql` migration.
+ 
+---
+ 
+## Application Architecture
+ 
+###  Layered structure
+ 
+```mermaid
+flowchart LR
+    subgraph L1["Controller Layer"]
+        direction TB
+        C1[AuthController]
+        C2[ShortLinkController]
+        C3[RedirectController]
+        C4[AccessGrantController]
+        C5[FormController]
+    end
+ 
+    subgraph L2["Service Layer — business rules"]
+        direction TB
+        S1[AuthService]
+        S2[ShortLinkService]
+        S3[AccessControlService]
+        S4[AccessLogService]
+        S5[FormService]
+        S6[EncryptionService]
+        S7[ShortCodeGeneratorService]
+    end
+ 
+    subgraph L3["Repository Layer — Spring Data JPA"]
+        direction TB
+        R1[(UserRepository)]
+        R2[(ShortLinkRepository)]
+        R3[(LinkAccessGrantRepository)]
+        R4[(FormFieldRepository)]
+        R5[(FormResponseRepository)]
+        R6[(AccessLogRepository)]
+    end
+ 
+    L1 --> L2 --> L3
+    S2 -.uses.-> S3
+    S2 -.uses.-> S4
+    S2 -.uses.-> S6
+    S2 -.uses.-> S7
+    S5 -.uses.-> S3
+```
+ 
+Every controller is a thin adapter: extract the caller's identity via `SecurityUtils`, delegate to a service, map the result to a DTO. All authorization logic (ownership checks, visibility rules, grant checks) lives in `AccessControlService` — one place, reused by both the redirect path and the form path, rather than duplicated per-controller.
+ 
+###  Authentication flow (JWT, stateless)
+ 
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant SPA as React SPA
+    participant Filter as JwtAuthFilter
+    participant Auth as AuthService
+    participant DB as PostgreSQL
+ 
+    U->>SPA: enters credentials
+    SPA->>Auth: POST /api/auth/login
+    Auth->>DB: findByUsernameOrEmail
+    Auth->>Auth: BCrypt.matches(password)
+    Auth-->>SPA: {accessToken, refreshToken, expiresAt}
+    SPA->>SPA: store both tokens
+ 
+    Note over SPA: every subsequent request
+    SPA->>Filter: request + Bearer accessToken
+    Filter->>Filter: extract + validate claims
+    Filter->>Filter: SecurityContext.setAuthentication()
+    Filter->>SPA: 200 (request proceeds)
+ 
+    Note over SPA: access token expires
+    SPA->>Filter: request + expired token
+    Filter-->>SPA: 401
+    SPA->>Auth: POST /api/auth/refresh (queues concurrent 401s)
+    Auth->>Auth: validate refresh token + type claim
+    Auth-->>SPA: new access + refresh token
+    SPA->>Filter: retry original request
+```
+ 
+**Why a `type` claim inside the JWT itself:** `JwtService` embeds `"type": "access"` or `"type": "refresh"` in the token payload. `JwtAuthFilter` explicitly rejects a refresh token used as an access token (`!jwtService.isRefreshToken(token)`) — otherwise a leaked refresh token (long-lived) could be replayed directly against protected endpoints instead of only the `/refresh` endpoint.
+ 
+**Why the filter swallows exceptions instead of rejecting the request itself:** a malformed/expired/tampered token just leaves the security context unauthenticated and calls `filterChain.doFilter()` anyway — it doesn't short-circuit with a 401 from inside the filter. That lets Spring Security's `authorizeHttpRequests` rules (which already know which paths are public) make the actual authorization decision, so a bad token on a public endpoint (e.g. `/r/{code}`) doesn't wrongly block an anonymous visitor.
+ 
+### Redirect resolution — the core access-control decision
+ 
+```mermaid
+sequenceDiagram
+    actor V as Visitor
+    participant RC as RedirectController
+    participant SLS as ShortLinkService
+    participant ACS as AccessControlService
+    participant ALS as AccessLogService
+    participant Enc as EncryptionService
+    participant DB as PostgreSQL
+ 
+    V->>RC: GET /r/{code}
+    RC->>SLS: resolveForRedirect(code, userIdOrNull, ip)
+    SLS->>DB: findByShortCode (or customAlias)
+ 
+    alt link inactive
+        SLS-->>V: 404 (via LinkNotFoundException)
+    else expired or exhausted
+        SLS->>ACS: assertAccessAllowed()
+        ACS-->>SLS: throws LinkExpiredException
+        SLS->>ALS: recordAttempt(granted=false)
+        SLS-->>V: 410 Gone
+    else visibility check
+        SLS->>ACS: assertAccessAllowed(link, userId)
+        alt owner
+            ACS-->>SLS: allowed
+        else PUBLIC
+            ACS-->>SLS: allowed
+        else PRIVATE, not owner
+            ACS-->>SLS: throws AccessDeniedException
+        else RESTRICTED
+            ACS->>DB: findByLinkIdAndGranteeIdAndStatus(ACTIVE)
+            alt has active grant
+                ACS-->>SLS: allowed
+            else no grant / anonymous
+                ACS-->>SLS: throws AccessDeniedException
+            end
+        end
+ 
+        opt access denied
+            SLS->>ALS: recordAttempt(granted=false)
+            SLS-->>V: 403
+        end
+ 
+        SLS->>DB: increment use_count, save
+        SLS->>ALS: recordAttempt(granted=true)
+        SLS->>Enc: decrypt(ciphertext, iv)
+        Enc-->>SLS: plaintext destination
+        SLS-->>RC: destinationUrl
+        RC-->>V: 302 Location: destinationUrl
+    end
+```
+ 
+**Why access logging runs in `Propagation.REQUIRES_NEW`:** `AccessLogService.recordAttempt()` opens its own transaction, independent of the caller's. A logging failure must never roll back — or block — the actual redirect decision, and conversely the redirect's own transaction rolling back (rare, but possible) shouldn't erase the fact that an attempt happened. Logging is best-effort telemetry; access control is not.
+ 
+**Why ownership checks happen at the query, not after fetch-then-compare:** `findByIdAndOwnerId(id, ownerId)` returns empty (→ 404) if the link exists but belongs to someone else — a caller can't distinguish "doesn't exist" from "exists but isn't yours" by response shape, which avoids leaking link existence to non-owners on write paths.
+ 
+### Access grant lifecycle (invite-by-email)
+ 
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING: owner invites by email,<br/>no account exists yet
+    [*] --> ACTIVE: owner grants by username,<br/>or email matches existing user
+    PENDING --> ACTIVE: invited email registers<br/>(AuthService.register auto-promotes)
+    ACTIVE --> REVOKED: owner revokes
+    REVOKED --> ACTIVE: owner reactivates
+```
+ 
+When `AuthService.register()` creates a new user, it queries `findByInvitedEmailAndStatus(email, PENDING)` and promotes every matching grant to `ACTIVE`, attaching the new `grantee_user_id` — so an invite sent before someone signs up resolves automatically the moment they do, with no separate "claim invite" step required from the user.
+ 
+### Dynamic form submission
+ 
+```mermaid
+sequenceDiagram
+    actor V as Visitor
+    participant FC as FormController
+    participant FS as FormService
+    participant ACS as AccessControlService
+    participant DB as PostgreSQL
+ 
+    V->>FC: GET /api/links/{id}/form (public)
+    FC->>FS: getFormSchema(linkId, userIdOrNull)
+    FS->>ACS: assertAccessAllowed (same rules as redirect)
+    FS->>DB: findByLinkIdOrderByDisplayOrderAsc
+    FS-->>V: field schema (types, required, options)
+ 
+    V->>FC: POST /api/links/{id}/form/submit {responseData}
+    FC->>FS: submitForm(linkId, userIdOrNull, request)
+    FS->>ACS: assertAccessAllowed
+    FS->>FS: validate each field:<br/>required · NUMBER · DATE · EMAIL · DROPDOWN/CHECKBOX∈options
+    FS->>DB: save FormResponse (JSONB)
+    FS-->>V: 201 Created
+```
+ 
+A form inherits its link's visibility rules — the same `AccessControlService.assertAccessAllowed()` gates both redirect and form access, so a RESTRICTED link's form isn't accidentally more or less exposed than its redirect target. Server-side validation (`FormService.validateSubmission`) is authoritative; the React form mirrors the same rules client-side purely for instant feedback, never as the actual gate.
+ 
 ## Data model
 
 Six Flyway-versioned migrations build up the schema:
