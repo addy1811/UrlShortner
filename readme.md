@@ -110,7 +110,7 @@ vite.config.js
 
 ##  High-Level Architecture
 <img width="1496" height="776" alt="AdobeExpressPhotos_a801fdc422ad4b9bac2b8269b68ce816_CopyEdited" src="https://github.com/user-attachments/assets/90af5201-55eb-401c-ab0c-1e683b7df8aa" />
-**two redirect paths (`/r/{code}` vs `/api/links/resolve/{code}`):** a plain browser navigation (typing/clicking a link) can never attach a custom `Authorization` header — browsers don't do that for normal navigation. So `/r/{code}` works for PUBLIC links only when access needs no token. The SPA calls `/resolve/{code}` via axios instead, which *does* attach the JWT, so PRIVATE/RESTRICTED links can be resolved for a logged-in owner/grantee, with the frontend performing the actual `window.location` redirect once access is confirmed. Both paths funnel into the same `ShortLinkService.resolveForRedirect()` — there's exactly one access-control code path, not two.
+**two redirect paths (`/r/{code}` vs `/api/links/resolve/{code}`):** a plain browser navigation (typing/clicking a link) can never attach a custom `Authorization` header browsers don't do that for normal navigation. So `/r/{code}` works for PUBLIC links only when access needs no token. The SPA calls `/resolve/{code}` via axios instead, which *does* attach the JWT, so PRIVATE/RESTRICTED links can be resolved for a logged-in owner/grantee, with the frontend performing the actual `window.location` redirect once access is confirmed. Both paths funnel into the same `ShortLinkService.resolveForRedirect()` there's exactly one access-control code path, not two.
 
 ## Database Design
  
@@ -197,13 +197,13 @@ erDiagram
  
 **Forms are schema-on-write, data-as-JSONB.** `form_fields` defines the schema (key, label, type, required, options) as real rows so it can be validated and rendered; `form_responses.response_data` stores the actual submitted values as `JSONB` keyed by `field_key`. This avoids an EAV (entity-attribute-value) table explosion for arbitrary form shapes while keeping the schema itself relational and constrainable  e.g. `UNIQUE(link_id, field_key)` prevents duplicate keys per form.
  
-**Partial index for the security relevant query.** `idx_access_logs_denied ON access_logs(link_id, access_granted) WHERE access_granted = false` — an owner's "who's been trying and failing to access my link" view only ever filters on denied attempts, so the partial index stays small and fast even as the full log grows unbounded.
+**Partial index for the security relevant query.** `idx_access_logs_denied ON access_logs(link_id, access_granted) WHERE access_granted = false` an owner's "who's been trying and failing to access my link" view only ever filters on denied attempts, so the partial index stays small and fast even as the full log grows unbounded.
  
 **GIN indexes on JSONB columns** (`short_links.metadata`, `form_responses.response_data`) support future filtering/search on semi-structured fields without a full table scan.
  
 **`ON DELETE CASCADE` from short_links downward, `ON DELETE SET NULL` for the user reference on responses/logs.** Deleting a link should clean up everything scoped to it (grants, fields, responses, logs). Deleting a *user*, though, shouldn't retroactively corrupt historical form submissions or access logs  those rows survive with `submitted_by_user_id`/`accessed_by_user_id` set to `NULL`, preserving the audit trail.
  
-**Flyway owns the schema; Hibernate only validates.** `ddl-auto: validate` in both dev and prod — entity/migration drift fails fast at startup instead of Hibernate silently "fixing" the schema. Every change is a numbered, reviewable `V{n}__description.sql` migration.
+**Flyway owns the schema; Hibernate only validates.** `ddl-auto: validate` in both dev and prod entity/migration drift fails fast at startup instead of Hibernate silently "fixing" the schema. Every change is a numbered, reviewable `V{n}__description.sql` migration.
  
 ---
  
