@@ -1,6 +1,6 @@
 # Shortner
 
-An encrypted URL shortener where the link owner  not the platform  decides who can actually use each link. Every destination URL is encrypted at rest, visibility is enforced per-link (public, private, or an explicit allow-list), and owners can attach a custom data-collection form that visitors fill out before being redirected.
+An encrypted URL shortener where the link owner  not the platform  decides who can actually use each link. Every destination URL is encrypted at rest, visibility is enforced per-link (public, private, or an explicit allow-list), and owners can attach a custom data collection form that visitors fill out before being redirected.
 
 Built as a Spring Boot backend with a React/Vite frontend.
 
@@ -193,15 +193,15 @@ erDiagram
  
 **Encrypted destination, not just access-gated.** `encrypted_destination` (AES-256-GCM ciphertext) + `encryption_iv` are stored as separate `BYTEA` columns rather than one field, because GCM needs a fresh 96-bit IV per encryption and it must travel with the ciphertext to decrypt. A raw DB dump never reveals where any link points — visibility rules protect *access*, encryption protects *confidentiality*, and they're deliberately independent layers.
  
-**Grants support invite-before-registration.** `access_grants.grantee_user_id` is nullable and `invited_email` fills the gap: `CHECK (grantee_user_id IS NOT NULL OR invited_email IS NOT NULL)` enforces that one of the two is always present. This lets an owner share a restricted link with someone who hasn't signed up yet — the grant sits `PENDING`, and `AuthService.register()` promotes any matching pending grants to `ACTIVE` the moment that email registers.
+**Grants support invite-before-registration.** `access_grants.grantee_user_id` is nullable and `invited_email` fills the gap: `CHECK (grantee_user_id IS NOT NULL OR invited_email IS NOT NULL)` enforces that one of the two is always present. This lets an owner share a restricted link with someone who hasn't signed up yet  the grant sits `PENDING`, and `AuthService.register()` promotes any matching pending grants to `ACTIVE` the moment that email registers.
  
-**Forms are schema-on-write, data-as-JSONB.** `form_fields` defines the schema (key, label, type, required, options) as real rows so it can be validated and rendered; `form_responses.response_data` stores the actual submitted values as `JSONB` keyed by `field_key`. This avoids an EAV (entity-attribute-value) table explosion for arbitrary form shapes while keeping the schema itself relational and constrainable — e.g. `UNIQUE(link_id, field_key)` prevents duplicate keys per form.
+**Forms are schema-on-write, data-as-JSONB.** `form_fields` defines the schema (key, label, type, required, options) as real rows so it can be validated and rendered; `form_responses.response_data` stores the actual submitted values as `JSONB` keyed by `field_key`. This avoids an EAV (entity-attribute-value) table explosion for arbitrary form shapes while keeping the schema itself relational and constrainable  e.g. `UNIQUE(link_id, field_key)` prevents duplicate keys per form.
  
-**Partial index for the security-relevant query.** `idx_access_logs_denied ON access_logs(link_id, access_granted) WHERE access_granted = false` — an owner's "who's been trying and failing to access my link" view only ever filters on denied attempts, so the partial index stays small and fast even as the full log grows unbounded.
+**Partial index for the security relevant query.** `idx_access_logs_denied ON access_logs(link_id, access_granted) WHERE access_granted = false` — an owner's "who's been trying and failing to access my link" view only ever filters on denied attempts, so the partial index stays small and fast even as the full log grows unbounded.
  
 **GIN indexes on JSONB columns** (`short_links.metadata`, `form_responses.response_data`) support future filtering/search on semi-structured fields without a full table scan.
  
-**`ON DELETE CASCADE` from short_links downward, `ON DELETE SET NULL` for the user reference on responses/logs.** Deleting a link should clean up everything scoped to it (grants, fields, responses, logs). Deleting a *user*, though, shouldn't retroactively corrupt historical form submissions or access logs — those rows survive with `submitted_by_user_id`/`accessed_by_user_id` set to `NULL`, preserving the audit trail.
+**`ON DELETE CASCADE` from short_links downward, `ON DELETE SET NULL` for the user reference on responses/logs.** Deleting a link should clean up everything scoped to it (grants, fields, responses, logs). Deleting a *user*, though, shouldn't retroactively corrupt historical form submissions or access logs  those rows survive with `submitted_by_user_id`/`accessed_by_user_id` set to `NULL`, preserving the audit trail.
  
 **Flyway owns the schema; Hibernate only validates.** `ddl-auto: validate` in both dev and prod — entity/migration drift fails fast at startup instead of Hibernate silently "fixing" the schema. Every change is a numbered, reviewable `V{n}__description.sql` migration.
  
@@ -285,11 +285,11 @@ sequenceDiagram
     SPA->>Filter: retry original request
 ```
  
-**Why a `type` claim inside the JWT itself:** `JwtService` embeds `"type": "access"` or `"type": "refresh"` in the token payload. `JwtAuthFilter` explicitly rejects a refresh token used as an access token (`!jwtService.isRefreshToken(token)`) — otherwise a leaked refresh token (long-lived) could be replayed directly against protected endpoints instead of only the `/refresh` endpoint.
+**Why a `type` claim inside the JWT itself:** `JwtService` embeds `"type": "access"` or `"type": "refresh"` in the token payload. `JwtAuthFilter` explicitly rejects a refresh token used as an access token (`!jwtService.isRefreshToken(token)`) otherwise a leaked refresh token (long-lived) could be replayed directly against protected endpoints instead of only the `/refresh` endpoint.
  
-**Why the filter swallows exceptions instead of rejecting the request itself:** a malformed/expired/tampered token just leaves the security context unauthenticated and calls `filterChain.doFilter()` anyway — it doesn't short-circuit with a 401 from inside the filter. That lets Spring Security's `authorizeHttpRequests` rules (which already know which paths are public) make the actual authorization decision, so a bad token on a public endpoint (e.g. `/r/{code}`) doesn't wrongly block an anonymous visitor.
+**Why the filter swallows exceptions instead of rejecting the request itself:** a malformed/expired/tampered token just leaves the security context unauthenticated and calls `filterChain.doFilter()` anyway it doesn't short-circuit with a 401 from inside the filter. That lets Spring Security's `authorizeHttpRequests` rules (which already know which paths are public) make the actual authorization decision, so a bad token on a public endpoint (e.g. `/r/{code}`) doesn't wrongly block an anonymous visitor.
  
-### Redirect resolution — the core access-control decision
+### Redirect resolution the core access-control decision
  
 ```mermaid
 sequenceDiagram
@@ -343,9 +343,9 @@ sequenceDiagram
     end
 ```
  
-**Why access logging runs in `Propagation.REQUIRES_NEW`:** `AccessLogService.recordAttempt()` opens its own transaction, independent of the caller's. A logging failure must never roll back — or block — the actual redirect decision, and conversely the redirect's own transaction rolling back (rare, but possible) shouldn't erase the fact that an attempt happened. Logging is best-effort telemetry; access control is not.
+**Why access logging runs in `Propagation.REQUIRES_NEW`:** `AccessLogService.recordAttempt()` opens its own transaction, independent of the caller's. A logging failure must never roll back or block the actual redirect decision, and conversely the redirect's own transaction rolling back (rare, but possible) shouldn't erase the fact that an attempt happened. Logging is best-effort telemetry; access control is not.
  
-**Why ownership checks happen at the query, not after fetch-then-compare:** `findByIdAndOwnerId(id, ownerId)` returns empty (→ 404) if the link exists but belongs to someone else — a caller can't distinguish "doesn't exist" from "exists but isn't yours" by response shape, which avoids leaking link existence to non-owners on write paths.
+**Why ownership checks happen at the query, not after fetch-then-compare:** `findByIdAndOwnerId(id, ownerId)` returns empty (→ 404) if the link exists but belongs to someone else a caller can't distinguish "doesn't exist" from "exists but isn't yours" by response shape, which avoids leaking link existence to non-owners on write paths.
  
 ### Access grant lifecycle (invite-by-email)
  
@@ -358,7 +358,7 @@ stateDiagram-v2
     REVOKED --> ACTIVE: owner reactivates
 ```
  
-When `AuthService.register()` creates a new user, it queries `findByInvitedEmailAndStatus(email, PENDING)` and promotes every matching grant to `ACTIVE`, attaching the new `grantee_user_id` — so an invite sent before someone signs up resolves automatically the moment they do, with no separate "claim invite" step required from the user.
+When `AuthService.register()` creates a new user, it queries `findByInvitedEmailAndStatus(email, PENDING)` and promotes every matching grant to `ACTIVE`, attaching the new `grantee_user_id` so an invite sent before someone signs up resolves automatically the moment they do, with no separate "claim invite" step required from the user.
  
 ### Dynamic form submission
  
@@ -384,7 +384,7 @@ sequenceDiagram
     FS-->>V: 201 Created
 ```
  
-A form inherits its link's visibility rules — the same `AccessControlService.assertAccessAllowed()` gates both redirect and form access, so a RESTRICTED link's form isn't accidentally more or less exposed than its redirect target. Server-side validation (`FormService.validateSubmission`) is authoritative; the React form mirrors the same rules client-side purely for instant feedback, never as the actual gate.
+A form inherits its link's visibility rules the same `AccessControlService.assertAccessAllowed()` gates both redirect and form access, so a RESTRICTED link's form isn't accidentally more or less exposed than its redirect target. Server-side validation (`FormService.validateSubmission`) is authoritative; the React form mirrors the same rules client-side purely for instant feedback, never as the actual gate.
  
 ## Data model
 
@@ -393,14 +393,14 @@ Six Flyway-versioned migrations build up the schema:
 | Migration | Table | Purpose |
 |---|---|---|
 | `V1` | `users` | Accounts — username, email, BCrypt password hash |
-| `V2` | `short_links` | The links themselves — encrypted destination + IV, visibility, custom alias, expiry, use limits, JSONB metadata |
+| `V2` | `short_links` | The links themselves encrypted destination + IV, visibility, custom alias, expiry, use limits, JSONB metadata |
 | `V3` | `access_grants` | Per-user or per-email access grants for `RESTRICTED` links (`PENDING`/`ACTIVE`/`REVOKED`) |
 | `V4` | `form_fields` | Custom form field definitions attached to a link |
 | `V5` | `form_responses` | Submitted responses to a link's form, stored as JSONB |
 | `V6` | `access_logs` | Every access attempt, hashed IP, whether it was granted |
 
 Notable design choices baked into the schema:
-- `short_links.encrypted_destination` / `encryption_iv` are `BYTEA` — the destination is never queryable as plaintext
+- `short_links.encrypted_destination` / `encryption_iv` are `BYTEA` the destination is never queryable as plaintext
 - `metadata` and `response_data` are `JSONB` with GIN indexes
 - `access_logs` has a partial index on denied attempts specifically, for a fast "show me who was blocked" query
 - Foreign keys cascade sensibly (deleting a user cascades to their links; deleting a link cascades to grants/fields/responses/logs)
@@ -461,7 +461,7 @@ Notable design choices baked into the schema:
 - **Pending email invites don't auto-activate on registration.** `LinkAccessGrantRepository.findByInvitedEmailAndStatus(...)` exists specifically to attach pending grants when an invited email signs up, and the code comments describe this flow — but `AuthService.register()` doesn't currently call it. An invited user who registers still needs the grant reactivated manually.
 - **`application.yml` has a YAML formatting bug:**
   This parses as a literal key rather than `port` mapped to `${PORT:8081}`, which can prevent the app from binding to Render's injected `$PORT` correctly. Should be `port: ${PORT:8081}`.
-- **`ProtectedRoute` is a UI-only gate.** It just prevents rendering an authenticated page for a logged-out user; the real enforcement is `SecurityConfig`'s `anyRequest().authenticated()` on the backend, as noted in the component's own comments — worth keeping in mind if extending it.
+- **`ProtectedRoute` is a UI-only gate.** It just prevents rendering an authenticated page for a logged-out user; the real enforcement is `SecurityConfig`'s `anyRequest().authenticated()` on the backend, as noted in the component's own comments worth keeping in mind if extending it.
 
 ---
 
